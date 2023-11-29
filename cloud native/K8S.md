@@ -219,4 +219,38 @@
     - https://kubernetes.github.io/ingress-nginx/examples/
 
 ### 存储抽象
+- 相关技术
+  - Glusterfs
+  - NFS（网络文件系统）
+    - NFS是网络文件系统，英文全称为Network File System，它允许网络中的计算机之间通过TCP/IP网络共享文件或目录，达到多个服务器文件同步的目的。
+  - Cephfs
+
+- NFS 网络文件系统搭建
+  1. 给每一个节点服务器安装 NFS 工具
+      ```sh
+      yum install -y nfs-utils
+      ```
+  2. 在主节点（master 节点）配置 nfs 服务器
+      ```sh
+      # 在主节点暴露 /nfs/data/ 目录，且所有服务器德普可以同步该目录（* 表示所有服务器，insecure 以表示非安全方式，rw 表示以读写方式，sync 表示同步目录）
+      echo "/nfs/data/ *(insecure,rw,sync,no_root_squash)" > /etc/exports
+      # 创建 /nfs/data/ 文件夹
+      mkdir -p /nfs/data/
+      # 启动 rpc 远程绑定服务，--now 等价于 enable + start
+      systemctl enable rpcbind --now
+      # 启动 nfs 服务器
+      systemctl enable nfs-server --now
+      # 配置生效
+      exports -r
+      ```
+  3. 配置从节点同步主节点目录
+      ```sh
+      # 查看主节点可同步的目录
+      showmount -e 主节点IP
+      # 创建 /nfs/data/ 文件夹
+      mkdir -p /nfs/data/
+      # 将主节点暴露的目录与单前服务器的目录进行挂载（同步）
+      mount -t nfs 主节点IP:/nfs/data/ /nfs/data/
+      ```
+
 
