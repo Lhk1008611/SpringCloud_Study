@@ -192,7 +192,7 @@
     ```
   
     - 域名方式访问
-  
+    
       -  这方式访问需要在 pod 内部才能访问 service
       
       ```shell
@@ -254,3 +254,74 @@
       ```
 
 
+  4. 将目录与 pod 挂载
+
+     1. 原生方式挂载
+
+        - 缺点，删除 Deployment 后目录依然存在，且无法配置挂载目录的容量空间大小
+
+          ```yaml
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+          	labels:
+          		app: nginx-pv
+          	name: nginx-pv
+          spec :
+          	replicas: 2
+          	selector:
+          		matchLabels:
+          			app: nginx-pv
+          	template:
+          		metadata:
+          			labels :
+          				app: nginx-pv
+          		spec :
+          			containers:
+          			-   image: nginx
+          			    name : nginx
+          			    volumeMounts :
+          				- name: html
+          				  mountPath: /usr/share/nginx/html
+          			volumes:
+          			-   name: html
+          			    nfs:
+          					server: 启动 nsf 的服务器IP
+          					path: /nfs/data/nginx-pv
+          ```
+
+          ```yaml
+          # 应用上述 yaml
+          kubectl apply -f 上面的yaml文件
+          ```
+
+     2. 通过 PV 和 PVC 挂载
+
+        - PV: PersistentVolume 持久卷
+
+        - PVC: PersistentVolumeClaim 持久卷声明
+   
+        - 可配置挂载目录的容量空间大小，删除 deployment 即可删除 PVC 并同步删除 deployment 对应挂载的数据
+        
+          - 静态供应容量
+          - 动态供应容量
+        
+          1. 创建 PV  池
+        
+             ```shell
+             #nfs主节点，创建挂载目录
+             mkdir -p /nfs/data/01
+             mkdir -p /nfs/data/02
+             mkdir -p /nfs/data/03
+             
+             #创建 PV 池
+             
+             ```
+        
+             
+        
+          2. 创建 PVC
+        
+             
+     
+     
