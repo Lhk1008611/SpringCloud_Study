@@ -290,7 +290,7 @@
           					path: /nfs/data/nginx-pv
           ```
 
-          ```yaml
+          ```bash
           # 应用上述 yaml
           kubectl apply -f 上面的yaml文件
           ```
@@ -298,30 +298,132 @@
      2. 通过 PV 和 PVC 挂载
 
         - PV: PersistentVolume 持久卷
-
+          ```bash
+          #查看 pv
+          kubectl get PV
+          ```
         - PVC: PersistentVolumeClaim 持久卷声明
-   
+          ```bash
+          #查看 pvc
+          kubectl get PVC
+          ```
         - 可配置挂载目录的容量空间大小，删除 deployment 即可删除 PVC 并同步删除 deployment 对应挂载的数据
         
-          - 静态供应容量
-          - 动态供应容量
+          - 静态供应容量(手動分配 PV 容量)
+          - 动态供应容量(自動分配 PV 容量)
         
-          1. 创建 PV  池
+          1. 创建 PV  池（静态供应容量）
         
              ```shell
-             #nfs主节点，创建挂载目录
+             #nfs主节点，创建持久卷目录
              mkdir -p /nfs/data/01
              mkdir -p /nfs/data/02
              mkdir -p /nfs/data/03
-             
-             #创建 PV 池
-             
              ```
-        
-             
-        
-          2. 创建 PVC
-        
+             創建 PV (yaml 文件)
+             ```yaml
+              apiVersion: v1
+              kind: PersistentVolume
+              metadata:
+                name: pv01-10m
+              spec :
+                capacity: 
+                  storage: 10M
+                accessModes:
+                  - ReadWriteMany
+                storageClassName: nfs
+                nfs: 
+                  path: /nfs/data/01
+                  server: 启动 nsf 的服务器IP
+              ---
+              apiVersion: v1
+              kind: PersistentVolume
+              metadata:
+                name: pv02-1gi
+              spec :
+                capacity: 
+                  storage: 1Gi
+                accessModes:
+                  - ReadWriteMany
+                storageClassName: nfs
+                nfs: 
+                  path: /nfs/data/02
+                  server: 启动 nsf 的服务器IP
+              ---
+                            apiVersion: v1
+              kind: PersistentVolume
+              metadata:
+                name: pv03-3gi
+              spec :
+                capacity: 
+                  storage: 3Gi
+                accessModes:
+                  - ReadWriteMany
+                storageClassName: nfs
+                nfs: 
+                  path: /nfs/data/03
+                  server: 启动 nsf 的服务器IP
+             ```
+             ```bash
+              # 应用上述 yaml
+              kubectl apply -f 上面的yaml文件
+             ```
+
+          2. 创建 PVC （pvc 與 pv 進行綁定）
+             ```yaml
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: nginx-pvc
+              spec :
+                accessModes:
+                  - ReadWriteMany
+                resource:
+                  requests:
+                    storage: 200Mi
+                storageClassName: nfs
+             ```
+
+          3. deployment 綁定 PVC
+              ```yaml
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                labels:
+                  app: nginx-deploy-pvc
+                name: nginx-deploy-pvc
+              spec:
+                replicas: 2
+                selector:
+                  matchLabels:
+                    app: nginx-deploy-pvc
+                template:
+                  metadata:
+                    labels :
+                      app: nginx-deploy-pvc
+                  spec:
+                    containers:
+                    - image: nginx
+                      name: nginx
+                      volumeMounts:
+                      - name: html
+                        mountPath: /usr/share/nginx/html
+                    volumes:
+                    - name: html
+                      persistentVolumeClaim:
+                      claimName: nginx-pvc
+              ```  
+### ConfigMap
+- 抽取應用配置，並可以自動更新 
+  - 將配置文件創建為 ConfigMap
+      ```bash
+      kubectl create cm ConfigMap名稱 --from-file=配置文件
+      #例
+      kubectl create cm redis-conf --from-file=redis.confs
+      ```
+  - 將 pod 的配置文件與 ConfigMap 進行掛載
+
+
              
      
      
