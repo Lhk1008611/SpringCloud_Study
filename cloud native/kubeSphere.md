@@ -257,3 +257,53 @@ kubectl apply -f https://github.com/kubesphere/ks-installer/releases/download/v3
 ### 4. 使用配置文件创建集群
 
 > 创建过程中提示需要安装一些组件，安装上即可
+
+## 四、kubeSphere 多租户
+
+- 参考文档
+  - [创建企业空间、项目、用户和平台角色 (kubesphere.io)](https://www.kubesphere.io/zh/docs/v3.4/quick-start/create-workspace-and-project/)
+
+### 1. 创建多角色用户
+
+- 多种内置角色类型，可以给用户分配相关权限
+  - platform-self-provisioner
+  - platform-regular
+  - platform-admin
+
+### 2. 企业空间
+
+- 企业空间也内置多种角色
+  - demo-workspace-admin
+  - demo-workspace-self-provisioner
+  - demo-workspace-viewer
+- 可在企业空间邀请用户并指定用户企业空间角色
+- 可在企业空间创建项目并邀请用户加入项目
+
+### 3.项目
+
+- 创建项目
+- 邀请成员加入项目
+
+## 五、使用 kubeSphere 在 kubernetes 集群上部署应用
+
+- 参考文档
+  - [创建并部署 WordPress (kubesphere.io)](https://www.kubesphere.io/zh/docs/v3.4/quick-start/wordpress-deployment/)
+
+- 按需部署 MySQL，Redis，ES，Mq（有状态工作负载）
+  - 创建工作负载（有状态副本集）
+    - 创建配置集并挂载（configMap）
+    - 创建存储卷并挂载（pvc）
+  - 为指定负载指定服务
+    - 内网访问（clusterIp）
+    - 外网访问（nodePort）
+- 应用商店部署（应用）
+- 应用仓库部署
+  - helm
+    - 参考文档
+      - [Helm | Chart](https://helm.sh/zh/docs/topics/charts/)
+  - 管理员角色的成员可以在应用管理中添加 helm 仓库
+
+## 六、kubeSphere 部署上云实战
+
+- ruoyi-cloud 项目上云
+  - [yangzongzhuan/RuoYi-Cloud: :tada: (RuoYi)官方仓库 基于Spring Boot、Spring Cloud & Alibaba的分布式微服务架构权限管理系统 (github.com)](https://github.com/yangzongzhuan/RuoYi-Cloud)
