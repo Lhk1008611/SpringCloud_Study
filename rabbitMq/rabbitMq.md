@@ -66,7 +66,7 @@
 | 消息延迟   | 微妙级                  | 毫秒级                            | 毫秒级     | 毫秒以内   |
 | 消息可靠性 | 高                      | 一般                              | 高         | 一般       |
 
-## RabbitMq
+## RabbitMq 基础
 
 ### RabbitMq 的安装
 
@@ -91,12 +91,16 @@
 
 > AMPQ，全称为Advanced Message Queuing Protocol，是一个提供统一消息服务的应用层标准高级消息队列协议。它是应用程协议的一个开放标准，为面向消息的中间件设计。AMPQ定义在协议层，跨语言，基于此协议的客户端与消息中间件之间可传递消息，并不受产品、开发语言等条件的影响。
 
-> Spring AMQP是基于Spring框架的AMQP消息解决方案，用于简化Spring应用程序对消息队列的使用。它提供模板化的发送和接收消息的抽象层，提供基于消息驱动的POJO的消息监听等，方便使用RabbitMQ程序的相关开发。Spring AMQP包含一些模块，如spring-amqp（抽象）、spring-rabbit（实现）和 spring-erlang 等，每个模块分别由独立的一些Jar包组成。
+> Spring AMQP是基于Spring框架的 AMQP 消息解决方案，用于简化 Spring 应用程序对消息队列的使用。它提供模板化的发送和接收消息的抽象层，提供基于消息驱动的POJO的消息监听等，方便使用RabbitMQ程序的相关开发。Spring AMQP包含一些模块，如spring-amqp（抽象）、spring-rabbit（实现）和 spring-erlang 等，每个模块分别由独立的一些Jar包组成。
 >
 > Spring AMQP定义了Message类，它定义了一个更一般的AMQP域模型，是Spring AMQP的重要组成部分。Message消息是当前模型中所操纵的基本单位，它由Producer产生，经过Broker被Consumer所消费。
 
 - Spring AMQP 官方文档
   - [Spring AMQP :: Spring AMQP](https://docs.spring.io/spring-amqp/reference/index.html)
+- SpringAMQP提供了几个类，用来声明队列、交换机及其绑定关系
+  - Queue:用于声明队列，可以用工厂类 QueueBuilder 构建
+  - Exchange:用于声明交换机，可以用工厂类 ExchangeBuilder 构建
+  - Binding:用于声明队列和交换机的绑定关系，可以用工厂类 BindingBuilder 构建
 
 ### WorkQueue
 
@@ -128,9 +132,116 @@
   - 同一条消息只会被一个消费者处理
   - 通过设置 `prefetch` 来控制消费者预取的消息数量，处理完一条再处理下一条，实现能者多劳
 
-### 交换机
+### 交换机（Exchange）
 
 - 真正生产环境都会经过 exchange 来发送消息，而不是直接发送到队列，交换机的类型有以下三种
   - Fanout：广播
+    
+    - Fanout Exchange 会将接收到的消息广播到每一个跟其绑定的queue，所以也叫广播模式
+    
+      ![](.\image\image-20240114215032477.png)
+    
   - Direct：定向
+  
+    - Direct Exchange 会将接收到的消息根据规则路由到指定的Queue，因此称为定向路由。
+  
+      - 路由规则
+  
+        - 每一个 Queue 都与 Exchange 设置一个 BindingKey
+        - 发布者发送消息时，指定消息的 RoutingKey
+        - Exchange 将消息路由到 BindingKey 与消息RoutingKey 一致的队列
+  
+        ![image-20240114220805258](.\image\image-20240114220805258.png)
+  
   - Topic：话题
+  
+    - TopicExchange 与 DirectExchange 类似，区别在于routingKey 可以是多个单词的列表，并且以`.`分割。
+  
+      - 指定 BindingKey 时可以使用通配符
+  
+      ![image-20240114222549934](.\image\image-20240114222549934.png)
+
+### 消息转换器
+
+- Spring的对消息对象的处理是由`orq.springframeworkamqp.support.converter.MessageConverter`来处理的。而默认实现是`simpleMessageConverter`，基于 JDK 的 `ObjectOutputStream` 完成序列化。
+  - 存在下列问题:
+    - IDK的序列化有安全风险
+    - IDK序列化的消息太大
+    - IDK序列化的消息可读性差
+
+### 相关API
+
+- `RabbitTemplate.convertAndSend()`  发送消息
+- `@RabbitListener` 监听消息，并可声明交换机和队列绑定
+- `@Queue`
+- `@Exchange`
+
+## 高级
+
+### 消息可靠性问题
+
+- 消息发送者可靠性
+
+  - 生产者重连
+
+    - 有的时候由于网络波动，可能会出现客户端连接MQ失败的情况。通过配置我们可以开启连接失败后的重连机制
+
+      ```yaml
+      spring:
+      	rabbitmq:
+      		connection-timeout: 1s # 设MQ的连接超时时间
+      		template:
+      			retry:
+      				enabled: true # 开户超时重试机制
+      				initial-interval: 1000ms # 失败后的初始等待时间
+      				multiplier: 1 # 失败后下次的等待时长倍数，下次等待时长 = initial-interval * multiplier
+      				max-attempts: 3 # 最大重试次数
+      ```
+
+    - 重连机制是阻塞式的，会影响性能
+
+  - 生产者确认
+
+    - RabbitMQ 提供了 Publisher Confirm 和 Publisher Return 两种确认机制。开启确机制认后，在 MQ 成功收到消息后会返回确认消息给生产者。返回的结果有以下几种情况:
+
+      - 消息投递到了 MQ，但是路由失败。此时会通过PublisherReturn 返回路由异常原因，然后返回ACK，告知投递成功
+
+      - 临时消息（未持久化）投递到了 MQ，并且入队成功，返回 ACK，告知投递成功
+
+      - 持久消息投递到了MQ，并且入队完成持久化，返回ACK ，告知投递成功
+
+      - 其它情况都会返回 NACK，告知投递失败
+
+        ```yaml
+        #在publisher这个微服务的application.yml中添加配置
+        spring:
+        	rabbitmq:
+        		publisher-confirm-type: correlated # 开publisher confirm机制，并设置confirm类型
+        		publisher-returns: true # 开publisher return机制
+        ```
+
+        > `publisher-confirm-type` 有三种模式可选`none`:关闭confirm机制
+        > `simple`:同步阻塞等待MQ的回执消息
+        > `correlated`:MQ异步回调方式返回回执消息
+
+      - 设置 ReturnsCallback 回调函数
+
+        ```java
+        rabbitTemplate.setReturnsCallback();
+        ```
+
+      - 消费者端执行 ReturnsCallback 
+
+      - 生产者端执行 confirmCallback
+
+    - 生产者确认需要额外的网络和系统资源开销，尽量不要使
+
+    - 用如果一定要使用，无需开启 Publisher-Return 机制，因为一般路由失败是自己业务问题
+
+    - 对于 nack 消息可以有限次数重试，依然失败则记录异常消息
+
+- MQ 的可靠性
+
+- 消费者的可靠性
+
+- 延迟消息
