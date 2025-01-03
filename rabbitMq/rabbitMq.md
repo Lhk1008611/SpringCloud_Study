@@ -165,9 +165,9 @@
 
 - Spring的对消息对象的处理是由`orq.springframeworkamqp.support.converter.MessageConverter`来处理的。而默认实现是`simpleMessageConverter`，基于 JDK 的 `ObjectOutputStream` 完成序列化。
   - 存在下列问题:
-    - IDK的序列化有安全风险
-    - IDK序列化的消息太大
-    - IDK序列化的消息可读性差
+    - JDK 的序列化有安全风险
+    - JDK 序列化的消息太大
+    - JDK 序列化的消息可读性差
 
 ### 相关API
 
@@ -180,72 +180,217 @@
 
 ### 消息可靠性问题
 
-- 消息发送者可靠性
+#### 消息发送者可靠性
 
-  - 生产者重连
+- 生产者重连
 
-    - 有的时候由于网络波动，可能会出现客户端连接MQ失败的情况。通过配置我们可以开启连接失败后的重连机制
+  - 有的时候由于**网络波动**，可能会出现客户端**连接MQ失败**的情况。通过配置我们可以开启连接失败后的重连机制
 
-      ```yaml
-      spring:
-      	rabbitmq:
-      		connection-timeout: 1s # 设MQ的连接超时时间
-      		template:
-      			retry:
-      				enabled: true # 开户超时重试机制
-      				initial-interval: 1000ms # 失败后的初始等待时间
-      				multiplier: 1 # 失败后下次的等待时长倍数，下次等待时长 = initial-interval * multiplier
-      				max-attempts: 3 # 最大重试次数
+    ```yaml
+    spring:
+    	rabbitmq:
+    		connection-timeout: 1s # 设置MQ的连接超时时间
+    		template:
+    			retry:
+    				enabled: true # 开户超时重试机制
+    				initial-interval: 1000ms # 失败后的初始等待时间
+    				multiplier: 1 # 失败后下次的等待时长倍数，下次等待时长 = initial-interval * multiplier
+    				max-attempts: 3 # 最大重试次数
+    ```
+
+  - 重连机制是阻塞式的，会影响性能；对于业务性能有要求的，不建议开启重试机制；或者使用异步线程进行消息发送
+
+- 生产者确认
+
+  - RabbitMQ 提供了 Publisher Confirm 和 Publisher Return 两种确认机制。开启确机制认后，在 MQ 成功收到消息后会返回确认消息给生产者。返回的结果有以下几种情况:
+
+    - 消息投递到了 MQ，但是路由失败。此时会通过 Publisher Return 返回路由异常原因，然后返回ACK，告知投递成功
+  - 临时消息（未持久化）投递到了 MQ，并且入队成功，返回 ACK，告知投递成功
+    - 持久消息投递到了MQ，并且入队完成持久化，返回ACK ，告知投递成功
+  - 其它情况都会返回 NACK，告知投递失败
+    
+  - 开启生产者确认机制
+
+    ```yaml
+    #在publisher这个微服务的application.yml中添加配置
+    spring:
+    	rabbitmq:
+    		publisher-confirm-type: correlated # 开publisher confirm机制，并设置confirm类型
+    		publisher-returns: true # 开publisher return机制
+    ```
+
+    > `publisher-confirm-type` 有三种模式可选
+    >
+    > `none`:关闭confirm机制
+    > `simple`:同步阻塞等待MQ的回执消息
+    > `correlated`:MQ异步回调方式返回回执消息
+
+    - 若开publisher return 机制，需要在mq初始化时，设置 ReturnsCallback 回调函数
+
+      ```java
+      rabbitTemplate.setReturnsCallback();
       ```
 
-    - 重连机制是阻塞式的，会影响性能
+    - 每一个生产者端执行单独的 confirmCallback
 
-  - 生产者确认
+      > - **生产者确认机制需要额外的网络和系统资源开销，尽量不要使用**
+      > - 用如果一定要使用，无需开启 Publisher-Return 机制，因为一般路由失败是自己业务问题
+      > - 对于 nack（消息投递失败） 消息可以有限次数重试，依然失败则记录异常消息
 
-    - RabbitMQ 提供了 Publisher Confirm 和 Publisher Return 两种确认机制。开启确机制认后，在 MQ 成功收到消息后会返回确认消息给生产者。返回的结果有以下几种情况:
+#### MQ 的可靠性
 
-      - 消息投递到了 MQ，但是路由失败。此时会通过PublisherReturn 返回路由异常原因，然后返回ACK，告知投递成功
+- MQ消息不可靠的情况
 
-      - 临时消息（未持久化）投递到了 MQ，并且入队成功，返回 ACK，告知投递成功
+  1. MQ 宕机，导致消息丢失
 
-      - 持久消息投递到了MQ，并且入队完成持久化，返回ACK ，告知投递成功
+  2. 内存空间有限
 
-      - 其它情况都会返回 NACK，告知投递失败
+     - 在消息发送到 mq 达到一定内存后会导致消息堆积，引发消息阻塞
 
-        ```yaml
-        #在publisher这个微服务的application.yml中添加配置
-        spring:
-        	rabbitmq:
-        		publisher-confirm-type: correlated # 开publisher confirm机制，并设置confirm类型
-        		publisher-returns: true # 开publisher return机制
-        ```
+       > 非持久消息过多会导致 MQ 进行 PageOut 
+       >
+       > PageOut : 消息堆积过多时，会将旧的未消费的临时消息持久化到磁盘，此过程会引发消息阻塞，即新消息无法发送到MQ
 
-        > `publisher-confirm-type` 有三种模式可选`none`:关闭confirm机制
-        > `simple`:同步阻塞等待MQ的回执消息
-        > `correlated`:MQ异步回调方式返回回执消息
+- 解决方案
 
-      - 设置 ReturnsCallback 回调函数
-
-        ```java
-        rabbitTemplate.setReturnsCallback();
-        ```
-
-      - 消费者端执行 ReturnsCallback 
-
-      - 生产者端执行 confirmCallback
-
-    - 生产者确认需要额外的网络和系统资源开销，尽量不要使
-
-    - 用如果一定要使用，无需开启 Publisher-Return 机制，因为一般路由失败是自己业务问题
-
-    - 对于 nack 消息可以有限次数重试，依然失败则记录异常消息
-
-- MQ 的可靠性
-
-  - 若不进行消息持久化，在消息发送到 mq 达到一定内存后会阻塞消息的处理，进行 PageOut 处理
   - 数据持久化
-    - 
 
-- 消费者的可靠性
+    1. 交换机持久化
 
-- 延迟消息
+       > spring 创建交换机时，会默认持久化交换机
+
+    2. 队列持久化
+
+       > spring 创建队列时，会默认持久化队列
+
+    3. **消息持久化**
+
+       - 发送消息时将 `delivery mode`设置为`2(persistent)`
+
+  - 使用 Lazy Queue （惰性队列）
+
+    - 特点
+      - 接收到消息后**直接存入磁盘**而非内存(内存中只保留最近的消息，默认2048条)
+      - 消费者要消费消息时才会从磁盘中读取并加载到内存
+      - 支持数百万条的消息存储
+    - 在 rabbit mq 3.12 版本后，默认所有队列都为 Lazy Queue （惰性队列）模式，且无法更改
+
+#### 消费者的可靠性
+
+- 消费者确认机制
+
+  >  为了确认消费者是否成功处理消息，RabbitMQ 提供了消费者确认机制(Consumer Acknowledgement)。
+  >
+  > 当消费者处理消息结束后，应该向 RabbitMQ 发送一个回执，告知 RabbitMQ 自己消息处理状态。
+
+  - 回执有三种可选值:
+    - ack:成功处理消息，RabbitMQ 从队列中删除该消息
+    - nack:消息处理失败，RabbitMQ 需要**再次投递消息**
+    - reject:消息处理失败并拒绝该消息，RabbitMQ 从队列中删除该消息
+
+  > SpringAMQP 已经实现了消息确认功能。并允许我们通过配置文件选择ACK处理方式，有三种方式: 
+  >
+  > 1. none:不处理。即消息投递给消费者后立刻 ack，消息会立刻从MQ除。非常不安全，不建议使用
+  > 2. manual:手动模式。需要自己在业务代码中调用 api，发送ack或reject，存在业务入侵，但更灵活
+  > 3. auto:自动模式。SpringAMQP 利用 AOP 对我们的消息处理逻辑做了环绕增强，当业务正常执行时则自动返回ack.当业务出现异常时，根据异常判断返回不同结果:
+  >    - 如果是业务异常，会自动返回 nack
+  >    - 如果是消息处理异常或校验异常，自动返回 reject
+
+  - 在消费者端开启 spring  配置
+
+    ```yml
+    spring:
+    	rabbitmg:
+    	  listener:
+    	    simple:
+    		  prefetch: 1
+    			acknowledge-mode: auto #none:关闭ack; manual:手动ack ; auto:自动ack
+    ```
+
+- 消费者消息失败（nack）处理策略
+
+  - 当消费者出现异常后，消息会不断 requeue (重新入队)到队列，再重新发送给消费者，然后再次异常，再次 requeue 无限循环，导致 mq 的消息处理飙升，带来不必要的压力。
+
+    - 我们可以利用 Spring 的 retry 机制，在消费者出现异常时利用**本地重试**，而不是无限制的 requeue 到 mq 队列，超过重试次数会删除消息
+
+      ```yml
+      spring:
+        rabbitmg:
+      	listener:
+      	  simple:
+              prefetch: 1
+                retry:
+                  enabled: true #开启消费者失败重试
+                  initial-interval: 1000ms #初始的失败等待时长为1秒
+                  multiplier: 1 #下次失败的等待时长倍数，下次等待时长=multiplier*last-interval
+                  max-attempts: 3 #最大重试次数
+                  stateless: true #true无状态:false有状态。如果业务中包含事务，这里改为false
+      ```
+
+    - 上述配置在超过最大重试次数后，依然会出现消息处理失败的问题
+
+      - 若需要在处理失败后继续对消息进行处理，则使用`MessageRecoverer`接口来处理，它包含三种不同的实现:
+        - `RejectAndDontRequeueRecoverer`:重试耗尽后，直接reject，丢弃消息。默认就是这种方式
+        - `ImmediateRequeueMessageRecoverer`:重试耗尽后，返回nack，消息重新入队
+        - `RepublishMessageRecoverer`:重试耗尽后，将失败消息投递到指定的交换机
+
+  - 结论
+
+    - 消费者如何保证消息一定被消费?
+      1. 开启消费者确认机制为 auto，由 spring 确认消息处理成功后返回 `ack`，异常时返回`nack`
+      2. 开启消费者失败重试机制，并设置`MessageRecoverer`，多次重试失败后将消息投递到异常交换机，交由人工处理
+
+- 业务幂等性
+
+  - 幂等是一个数学概念，用函数表达式来描述是这样的:`f(x)=f(f(x))`。在程序开发中，则是指同一个业务，执行一次或
+    多次对业务状态的影响是一致的。
+
+  - 在使用消息队列时，当一个消息被多次消费可能会引起业务的幂等性问题，因此需要确保使用消息队列时业务的幂等性
+
+    - 解决方案
+
+      1. 方案一：是给每个消息都设置一个唯一id，利用id区分是否是重复消息:
+
+         > - 每一条消息都生成一个唯一的id，与消息一起投递给消费者。
+         > - 消费者接收到消息后处理自己的业务，业务处理成功后将消息ID保存到数据库
+         > - 如果下次又收到相同消息，去数据库查询判断是否存在，存在则为重复消息放弃处理
+
+         - 配置消息转换器时可以配置自动创建消息id（uuid）
+
+           ```java
+           @Bean
+           public MessageConverter messageConverter(){
+               //1.定义消息转换器
+               Jackson2JsonMessageConverter jimc = new Jackson2JsonMessageConverter();
+               //2.配置自动创建消息id，用于识别不同消息，也可以在业务中基于ID判断是否是重复消息
+               jjmc.setCreateMessageIds(true);
+               return jjmc;
+           }
+           ```
+
+         - 或者自自己在消息头中加入自定义算法的消息ID
+
+      2. 方案二：基于业务逻辑解决业务幂等性
+
+#### 延迟消息
+
+> - 延迟消息：生产者发送消息时指定一个时间，消费者不会立刻收到消息，而是在指定时间之后才收到消息。
+> - 延迟任务：设置在一定时间之后才执行的任务
+
+- 死信交换机
+
+  > 当一个队列中的消息满足下列情况之一时，就会成为死信(dead letter)
+  >
+  > - 消费者使用 basic.rejec t或 basic.nack 声明消费失败，并且消息的requeue参数设置为false
+  > - 消息是一个过期消息(达到了队列或消息本身设置的过期时间)，超时无人消费
+  > - 要投递的队列消息堆积满了，最早的消息可能成为死信
+  >
+  > 如果队列通过 dead-letter-exchange 属性指定了一个交换机，那么该队列中的死信就会投递到这个交换机中。这个交换机称为死信交换机(Dead LetterExchange，简称DLX)。
+
+  - 可以使用死信交换机和实现延迟消息
+
+    ![image-20240605044209054](.\image\image-20240605044209054.png)
+
+- 延迟消息插件
+
+  > RabbitMQ 的官方也推出了一个插件，原生支持延迟消息功能。该插件的原理是设计了一种支持延迟消息功能的交换机当消息投递到交换机后可以暂存一定时间，到期后再投递到队列。
